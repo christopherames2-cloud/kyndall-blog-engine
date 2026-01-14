@@ -5,6 +5,16 @@ import { createClient } from '@sanity/client'
 
 let client = null
 
+// Keywords that should NEVER be filtered out (even if short)
+const PRESERVE_KEYWORDS = [
+  'men', 'man', 'male', 'boy', 'guy',
+  'women', 'woman', 'female', 'girl', 'gal',
+  'teen', 'kid', 'kids', 'baby', 'mom', 'dad',
+  'oily', 'dry', 'acne', 'glow', 'dewy', 'matte',
+  'lip', 'eye', 'brow', 'lash', 'nail', 'hair',
+  'spf', 'diy', 'bbw', 'asmr'
+]
+
 function getClient() {
   if (!client) {
     client = createClient({
@@ -46,14 +56,21 @@ export async function findRelatedContent(article, trend) {
 
 /**
  * Extract keywords from article content for matching
+ * Now preserves important short keywords like "men", "oily", etc.
  */
 function extractKeywords(article, trend) {
   const keywords = new Set()
   
+  // Helper to check if word should be kept
+  const shouldKeepWord = (w) => {
+    if (PRESERVE_KEYWORDS.includes(w)) return true
+    return w.length > 3
+  }
+  
   // Add from trend
   if (trend.topic) {
     const words = trend.topic.toLowerCase().split(/\s+/)
-    words.forEach(w => w.length > 3 && keywords.add(w))
+    words.forEach(w => shouldKeepWord(w) && keywords.add(w))
   }
   if (trend.tags) {
     trend.tags.forEach(t => keywords.add(t.toLowerCase()))
@@ -62,7 +79,7 @@ function extractKeywords(article, trend) {
   // Add from article
   if (article.title) {
     const words = article.title.toLowerCase().split(/\s+/)
-    words.forEach(w => w.length > 3 && keywords.add(w))
+    words.forEach(w => shouldKeepWord(w) && keywords.add(w))
   }
   if (article.keywords) {
     article.keywords.forEach(k => keywords.add(k.toLowerCase()))
@@ -164,8 +181,8 @@ async function findRelatedArticles(client, keywords, currentTitle) {
  * Used for more advanced matching if needed
  */
 function calculateSimilarity(text1, text2) {
-  const words1 = new Set(text1.toLowerCase().split(/\s+/).filter(w => w.length > 3))
-  const words2 = new Set(text2.toLowerCase().split(/\s+/).filter(w => w.length > 3))
+  const words1 = new Set(text1.toLowerCase().split(/\s+/).filter(w => w.length > 3 || PRESERVE_KEYWORDS.includes(w)))
+  const words2 = new Set(text2.toLowerCase().split(/\s+/).filter(w => w.length > 3 || PRESERVE_KEYWORDS.includes(w)))
   
   let intersection = 0
   for (const word of words1) {
