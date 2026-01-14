@@ -1,0 +1,33 @@
+{
+  "name": "kyndall-blog-engine",
+  "version": "1.0.0",
+  "description": "Auto-generates GEO-optimized SEO articles from trending beauty/lifestyle topics",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "test": "node src/index.js"
+  },
+  "keywords": [
+    "seo",
+    "geo",
+    "content-generation",
+    "trending",
+    "beauty",
+    "lifestyle",
+    "sanity",
+    "anthropic",
+    "claude"
+  ],
+  "author": "Kyndall Ames",
+  "license": "UNLICENSED",
+  "private": true,
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.24.0",
+    "@sanity/client": "^6.15.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
