@@ -1,6 +1,9 @@
 // kyndall-blog-engine/src/generator/prompts.js
 // GEO-optimized prompts for generating high-quality articles
 
+// Get current year dynamically
+const CURRENT_YEAR = new Date().getFullYear()
+
 /**
  * Main article content prompt
  */
@@ -10,6 +13,7 @@ export function getArticlePrompt(topic, platform, tags) {
 TOPIC: ${topic}
 TRENDING ON: ${platform}
 RELATED TAGS: ${tags.join(', ')}
+CURRENT YEAR: ${CURRENT_YEAR}
 
 Write a comprehensive, authoritative article that:
 1. Positions Kyndall as an expert in this topic
@@ -37,6 +41,11 @@ WRITING GUIDELINES:
 - Don't use "I" - write in third person or address the reader directly with "you"
 - Include data points or specifics where possible (e.g., "apply in upward strokes for 60 seconds")
 
+IMPORTANT - YEAR REFERENCES:
+- The current year is ${CURRENT_YEAR}. If you reference a year in the title or content, use ${CURRENT_YEAR}.
+- PREFER timeless titles that don't need a year (e.g., "Best Foundations for Oily Skin" instead of "${CURRENT_YEAR} Best Foundations")
+- Only include the year if the topic is explicitly about current trends or new releases
+
 IMPORTANT FOR GEO:
 - Use clear, declarative statements that AI can extract
 - Define terms when first used
@@ -51,6 +60,7 @@ export function getFAQPrompt(topic, excerpt) {
   return `Generate 5-7 FAQ items for an article about: "${topic}"
 
 Context: ${excerpt}
+Current Year: ${CURRENT_YEAR}
 
 These FAQs are CRITICAL for GEO (Generative Engine Optimization). AI engines like ChatGPT, Claude, and Perplexity frequently extract and cite FAQ content.
 
@@ -69,6 +79,7 @@ GUIDELINES FOR EFFECTIVE FAQs:
 4. Include specific details (ingredients, timeframes, techniques)
 5. Be definitive - avoid "it depends" unless necessary
 6. Each answer should be 40-80 words
+7. If referencing the current year, use ${CURRENT_YEAR}
 
 QUESTION TYPES TO INCLUDE:
 - Definition/explanation question ("What is...")
@@ -90,6 +101,7 @@ export function getTakeawayPrompt(topic, excerpt) {
   return `Generate 3-5 key takeaways for an article about: "${topic}"
 
 Context: ${excerpt}
+Current Year: ${CURRENT_YEAR}
 
 Key takeaways should be:
 - Scannable bullet points readers remember
@@ -110,6 +122,7 @@ GUIDELINES:
 - Include specific details (numbers, ingredients, techniques)
 - Make them "tweet-able" - shareable insights
 - Avoid generic advice - be specific to this topic
+- Prefer timeless advice; only reference ${CURRENT_YEAR} if essential
 
 Example good takeaways:
 ✨ "Double cleansing removes 90% more sunscreen than single cleansing"
@@ -122,6 +135,8 @@ Example good takeaways:
  */
 export function getTipsPrompt(topic) {
   return `Generate 3-4 expert tips for: "${topic}"
+
+Current Year: ${CURRENT_YEAR}
 
 These tips should position Kyndall as a knowledgeable beauty expert sharing insider knowledge.
 
@@ -139,6 +154,7 @@ GUIDELINES:
 - Include specific techniques or methods
 - Explain the "why" behind each tip
 - Pro tips should be genuinely advanced/extra
+- Keep tips timeless when possible
 
 Example good tip:
 {
@@ -164,6 +180,8 @@ ABOUT KYNDALL:
 - Appreciates both drugstore and luxury finds
 - Trending topic found on: ${platform}
 
+CURRENT YEAR: ${CURRENT_YEAR}
+
 OUTPUT FORMAT (respond as JSON):
 {
   "headline": "Catchy section header like 'My Honest Take' or 'Real Talk' (3-5 words)",
@@ -179,6 +197,7 @@ TONE GUIDELINES:
 - Should feel like advice from a trusted friend
 - Mention what works and what doesn't
 - Reference the ${platform} beauty community if relevant
+- Keep perspective current and relevant to ${CURRENT_YEAR}
 
 Example opening lines:
 - "Okay, real talk about this trend..."
