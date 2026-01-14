@@ -8,6 +8,7 @@ import { fetchInstagramTrends } from './trends/instagram.js'
 import { generateArticle } from './generator/article.js'
 import { findRelatedContent } from './linker/internal.js'
 import { initSanity, createDraftArticle, getRecentArticles } from './sanity.js'
+import { searchUnsplashImage, trackDownload } from './images/unsplash.js'
 
 // Configuration
 const CONFIG = {
@@ -199,6 +200,21 @@ async function runArticleGeneration() {
       try {
         const article = await generateArticle(trend)
         console.log(`      ✅ Generated: "${article.title}"`)
+        
+        // Fetch featured image from Unsplash
+        console.log(`      🖼️ Fetching featured image...`)
+        const image = await searchUnsplashImage(trend.topic, article.category)
+        if (image) {
+          article.featuredImageUrl = image.url
+          article.featuredImageAlt = image.alt
+          article.imageCredit = image.credit
+          article.attributionHtml = image.attributionHtml
+          // Track download per Unsplash API guidelines
+          await trackDownload(image.downloadUrl)
+          console.log(`      ✅ Image found: "${image.alt}"`)
+        } else {
+          console.log(`      ⚠️ No image found - article will have no featured image`)
+        }
         
         console.log(`      🔗 Finding related content...`)
         const relatedContent = await findRelatedContent(article, trend)
