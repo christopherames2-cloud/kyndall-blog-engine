@@ -3,6 +3,9 @@
 
 const YOUTUBE_API_BASE = 'https://www.googleapis.com/youtube/v3'
 
+// Get current year dynamically
+const CURRENT_YEAR = new Date().getFullYear()
+
 /**
  * Fetch trending beauty/lifestyle topics from YouTube
  */
@@ -45,9 +48,9 @@ export async function fetchYouTubeTrends() {
 async function searchTrendingVideos(apiKey) {
   const trends = []
   
-  // Search queries that capture trending beauty content
+  // Search queries that capture trending beauty content - USE DYNAMIC YEAR
   const searchQueries = [
-    'beauty trends 2024',
+    `beauty trends ${CURRENT_YEAR}`,
     'makeup tutorial viral',
     'skincare routine trending',
     'grwm makeup',
@@ -213,7 +216,7 @@ function extractTopicFromTitle(title) {
     .replace(/\(.*?\)/g, '') // Remove parentheses content
     .replace(/\[.*?\]/g, '') // Remove bracket content
     .replace(/[-–—].*$/g, '') // Remove everything after dash
-    .replace(/\d{4}/g, '') // Remove years
+    .replace(/\d{4}/g, '') // Remove years (we'll add current year dynamically if needed)
     .replace(/[!?]+/g, '') // Remove excessive punctuation
     .replace(/\s+/g, ' ') // Normalize whitespace
     .trim()
