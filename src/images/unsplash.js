@@ -3,6 +3,16 @@
 
 const UNSPLASH_ACCESS_KEY = process.env.UNSPLASH_ACCESS_KEY
 
+// Keywords that should NEVER be filtered out (even if short)
+const PRESERVE_KEYWORDS = [
+  'men', 'man', 'male', 'boy', 'guy',
+  'women', 'woman', 'female', 'girl', 'gal',
+  'teen', 'kid', 'kids', 'baby', 'mom', 'dad',
+  'oily', 'dry', 'acne', 'glow', 'dewy', 'matte',
+  'lip', 'eye', 'brow', 'lash', 'nail', 'hair',
+  'spf', 'diy', 'bbw', 'asmr'
+]
+
 // Beauty/skincare related search term mappings
 const CATEGORY_SEARCH_TERMS = {
   makeup: ['makeup tutorial', 'cosmetics flatlay', 'beauty products', 'lipstick aesthetic'],
@@ -31,12 +41,17 @@ export async function searchUnsplashImage(topic, category = 'lifestyle') {
     const categoryTerms = CATEGORY_SEARCH_TERMS[category] || CATEGORY_SEARCH_TERMS.lifestyle
     const randomTerm = categoryTerms[Math.floor(Math.random() * categoryTerms.length)]
     
-    // Extract key words from topic
+    // Extract key words from topic - PRESERVE important short words
     const topicWords = topic.toLowerCase()
       .replace(/[^a-z\s]/g, '')
       .split(' ')
-      .filter(w => w.length > 3)
-      .slice(0, 3)
+      .filter(w => {
+        // Keep preserved keywords regardless of length
+        if (PRESERVE_KEYWORDS.includes(w)) return true
+        // Otherwise require length > 3
+        return w.length > 3
+      })
+      .slice(0, 4) // Take up to 4 words for better specificity
       .join(' ')
     
     const searchQuery = `${topicWords} ${randomTerm}`.trim()
