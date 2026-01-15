@@ -363,27 +363,203 @@ function extractSection(text, sectionName) {
   return match ? match[1].trim() : null
 }
 
+/**
+ * Convert text/markdown to Sanity Portable Text format
+ * Properly handles markdown headers (##, ###) and formatting
+ */
 function convertToPortableText(text) {
   if (!text) return []
   if (Array.isArray(text)) return text // Already portable text
   
-  // Split into paragraphs
-  const paragraphs = text.split(/\n\n+/).filter(p => p.trim())
+  const blocks = []
   
-  return paragraphs.map(para => ({
+  // Split by lines first, then group into paragraphs
+  const lines = text.split('\n')
+  let currentParagraph = []
+  
+  for (const line of lines) {
+    const trimmedLine = line.trim()
+    
+    // Check for markdown headers
+    const h2Match = trimmedLine.match(/^##\s+(.+)$/)
+    const h3Match = trimmedLine.match(/^###\s+(.+)$/)
+    const h4Match = trimmedLine.match(/^####\s+(.+)$/)
+    
+    if (h2Match || h3Match || h4Match) {
+      // First, flush any accumulated paragraph
+      if (currentParagraph.length > 0) {
+        const paraText = currentParagraph.join(' ').trim()
+        if (paraText) {
+          blocks.push(createBlock(paraText, 'normal'))
+        }
+        currentParagraph = []
+      }
+      
+      // Add the header block
+      if (h2Match) {
+        blocks.push(createBlock(h2Match[1].trim(), 'h2'))
+      } else if (h3Match) {
+        blocks.push(createBlock(h3Match[1].trim(), 'h3'))
+      } else if (h4Match) {
+        blocks.push(createBlock(h4Match[1].trim(), 'h4'))
+      }
+    } else if (trimmedLine === '') {
+      // Empty line = end of paragraph
+      if (currentParagraph.length > 0) {
+        const paraText = currentParagraph.join(' ').trim()
+        if (paraText) {
+          blocks.push(createBlock(paraText, 'normal'))
+        }
+        currentParagraph = []
+      }
+    } else {
+      // Regular text line - accumulate into paragraph
+      currentParagraph.push(trimmedLine)
+    }
+  }
+  
+  // Don't forget the last paragraph
+  if (currentParagraph.length > 0) {
+    const paraText = currentParagraph.join(' ').trim()
+    if (paraText) {
+      blocks.push(createBlock(paraText, 'normal'))
+    }
+  }
+  
+  return blocks
+}
+
+/**
+ * Create a Portable Text block with proper structure
+ * Handles inline markdown formatting (bold, italic)
+ */
+function createBlock(text, style) {
+  const { children, markDefs } = parseInlineFormatting(text)
+  
+  return {
     _type: 'block',
     _key: generateKey(),
-    style: 'normal',
-    children: [
-      {
+    style: style,
+    markDefs: markDefs,
+    children: children,
+  }
+}
+
+/**
+ * Parse inline markdown formatting (bold, italic) into Portable Text spans
+ */
+function parseInlineFormatting(text) {
+  const children = []
+  const markDefs = []
+  
+  // Pattern to match **bold**, *italic*, and [link](url)
+  // Process the text segment by segment
+  let remaining = text
+  let lastIndex = 0
+  
+  // Combined pattern for bold, italic, and links
+  const pattern = /(\*\*(.+?)\*\*|\*(.+?)\*|\[(.+?)\]\((.+?)\))/g
+  
+  let match
+  let segments = []
+  let lastEnd = 0
+  
+  while ((match = pattern.exec(text)) !== null) {
+    // Add plain text before this match
+    if (match.index > lastEnd) {
+      segments.push({
+        type: 'plain',
+        text: text.slice(lastEnd, match.index)
+      })
+    }
+    
+    if (match[2]) {
+      // Bold: **text**
+      segments.push({
+        type: 'bold',
+        text: match[2]
+      })
+    } else if (match[3]) {
+      // Italic: *text*
+      segments.push({
+        type: 'italic',
+        text: match[3]
+      })
+    } else if (match[4] && match[5]) {
+      // Link: [text](url)
+      segments.push({
+        type: 'link',
+        text: match[4],
+        url: match[5]
+      })
+    }
+    
+    lastEnd = match.index + match[0].length
+  }
+  
+  // Add remaining plain text
+  if (lastEnd < text.length) {
+    segments.push({
+      type: 'plain',
+      text: text.slice(lastEnd)
+    })
+  }
+  
+  // If no formatting found, just return plain text
+  if (segments.length === 0) {
+    return {
+      children: [{
         _type: 'span',
         _key: generateKey(),
-        text: para.trim(),
-        marks: [],
+        text: text,
+        marks: []
+      }],
+      markDefs: []
+    }
+  }
+  
+  // Convert segments to Portable Text children
+  for (const segment of segments) {
+    if (segment.type === 'plain') {
+      if (segment.text) {
+        children.push({
+          _type: 'span',
+          _key: generateKey(),
+          text: segment.text,
+          marks: []
+        })
       }
-    ],
-    markDefs: [],
-  }))
+    } else if (segment.type === 'bold') {
+      children.push({
+        _type: 'span',
+        _key: generateKey(),
+        text: segment.text,
+        marks: ['strong']
+      })
+    } else if (segment.type === 'italic') {
+      children.push({
+        _type: 'span',
+        _key: generateKey(),
+        text: segment.text,
+        marks: ['em']
+      })
+    } else if (segment.type === 'link') {
+      const linkKey = generateKey()
+      markDefs.push({
+        _type: 'link',
+        _key: linkKey,
+        href: segment.url
+      })
+      children.push({
+        _type: 'span',
+        _key: generateKey(),
+        text: segment.text,
+        marks: [linkKey]
+      })
+    }
+  }
+  
+  return { children, markDefs }
 }
 
 function generateSlug(title) {
