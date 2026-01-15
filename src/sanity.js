@@ -35,12 +35,16 @@ export async function uploadImageFromUrl(imageUrl, filename = 'article-image') {
       return null
     }
     
-    const buffer = await response.arrayBuffer()
-    const blob = new Blob([buffer])
+    // Get as array buffer and convert to Node.js Buffer (NOT Blob!)
+    const arrayBuffer = await response.arrayBuffer()
+    const buffer = Buffer.from(arrayBuffer)
     
-    // Upload to Sanity
-    const asset = await client.assets.upload('image', blob, {
+    console.log(`   📦 Image fetched, size: ${buffer.length} bytes`)
+    
+    // Upload to Sanity using Buffer (works in Node.js)
+    const asset = await client.assets.upload('image', buffer, {
       filename: `${filename}.jpg`,
+      contentType: response.headers.get('content-type') || 'image/jpeg',
     })
     
     console.log(`   ✅ Image uploaded: ${asset._id}`)
@@ -74,13 +78,9 @@ export async function createDraftArticle(article) {
       article.slug || 'article'
     )
     
+    // Only set alt text if image upload succeeded
     if (featuredImage && article.featuredImageAlt) {
       featuredImage.alt = article.featuredImageAlt
-    }
-    
-    // Add photo credit to article if from Unsplash
-    if (article.imageCredit) {
-      featuredImage.credit = article.imageCredit
     }
   }
 
@@ -100,7 +100,7 @@ export async function createDraftArticle(article) {
     category: article.category,
     excerpt: article.excerpt,
     
-    // Featured image
+    // Featured image (may be null if upload failed)
     featuredImage: featuredImage,
     
     // Content sections
@@ -164,7 +164,7 @@ export async function createDraftArticle(article) {
       detectedAt: article.trendSource.detectedAt,
     } : null,
     
-    // Image credit (for Unsplash attribution - required by API guidelines)
+    // Image credit (for Unsplash attribution - stored as separate field, NOT on featuredImage)
     imageCredit: article.imageCredit ? {
       name: article.imageCredit.name,
       username: article.imageCredit.username,
