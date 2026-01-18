@@ -1,6 +1,6 @@
 // kyndall-blog-engine/src/generator/prompts.js
 // GEO-optimized prompts for generating high-quality articles with Kyndall's voice
-// UPDATED: Ensures schema-safe FAQ answers (plain text only, no markdown)
+// UPDATED: Added getReferencesPrompt() for authoritative source citations
 
 const CURRENT_YEAR = new Date().getFullYear()
 
@@ -219,4 +219,96 @@ OUTPUT FORMAT (respond with ONLY valid JSON, no markdown):
   "content": "2-4 sentences of personal perspective. First person, casual, authentic. Plain text only.",
   "mood": "love|recommend|mixed|caution|skip"
 }`
+}
+
+/**
+ * References generation prompt - NEW for GEO/E-E-A-T
+ * Generates authoritative sources to support article claims
+ */
+export function getReferencesPrompt(topic, excerpt, contentSummary) {
+  return `You are a research assistant finding authoritative references for a beauty/lifestyle article.
+
+ARTICLE TOPIC: ${topic}
+ARTICLE EXCERPT: ${excerpt}
+CONTENT SUMMARY: ${contentSummary}
+
+YOUR TASK:
+Find 3-5 REAL, AUTHORITATIVE references that support claims in this article.
+
+═══════════════════════════════════════════════════════════════
+⚠️  CRITICAL: SOURCE VERIFICATION RULES - READ CAREFULLY ⚠️
+═══════════════════════════════════════════════════════════════
+
+1. ONLY cite sources you are CERTAIN exist with REAL URLs
+2. If you're not 100% sure a URL exists, DO NOT include it
+3. Better to return 2-3 verified sources than 5 questionable ones
+
+SOURCE QUALITY HIERARCHY (prefer higher tiers):
+
+TIER 1 - BEST (medical/scientific claims):
+- PubMed studies: https://pubmed.ncbi.nlm.nih.gov/[ID]/
+- NIH resources: https://www.nih.gov/...
+- FDA: https://www.fda.gov/...
+- AAD (dermatology): https://www.aad.org/...
+- CDC: https://www.cdc.gov/...
+
+TIER 2 - GOOD (health/medical content):
+- Healthline: https://www.healthline.com/...
+- WebMD: https://www.webmd.com/...
+- Mayo Clinic: https://www.mayoclinic.org/...
+- Cleveland Clinic: https://my.clevelandclinic.org/...
+
+TIER 3 - ACCEPTABLE (beauty/lifestyle claims):
+- Allure: https://www.allure.com/...
+- Byrdie: https://www.byrdie.com/...
+- Elle: https://www.elle.com/...
+- Vogue: https://www.vogue.com/...
+
+TIER 4 - USE SPARINGLY (brand claims only):
+- Official brand pages for product-specific claims
+- Only use for "the brand says X" type citations
+
+NEVER USE:
+- Random blogs or personal sites
+- Pinterest, Reddit, Quora, forums
+- Affiliate sites
+- Sites with excessive ads
+- Wikipedia (cite the original source instead)
+- Any URL you're not certain exists
+
+MATCHING RULES:
+- Medical/ingredient claims → MUST use Tier 1-2 sources
+- Technique/application tips → Can use Tier 2-3
+- Trend observations → Can use Tier 3
+- Product claims → Tier 4 only for official brand statements
+
+FOR EACH REFERENCE PROVIDE:
+- title: Exact article/study title (as it appears on the page)
+- publisher: Publication name (e.g., "PubMed", "Healthline", "Allure")
+- url: Full canonical URL (MUST BE REAL AND ACCESSIBLE)
+- note: 1-2 sentences explaining what specific claim this supports
+- supportedSections: Array of section names this supports (e.g., ["Quick Answer", "Why It Works", "FAQ #2"])
+
+OUTPUT FORMAT (respond with ONLY valid JSON, no markdown):
+{
+  "references": [
+    {
+      "title": "Exact Title of the Article or Study",
+      "publisher": "Publication Name",
+      "url": "https://real-verified-url.com/path",
+      "note": "Supports the claim that [specific claim]. This source provides [what it proves].",
+      "supportedSections": ["Quick Answer", "Section Name"]
+    }
+  ]
+}
+
+VERIFICATION CHECKLIST (mentally verify before including):
+✓ I am certain this URL format is correct for this publisher
+✓ I am certain this article/study exists
+✓ The title matches what this publisher would actually publish
+✓ The claim I'm citing is actually covered in this source
+✓ This is not a hallucinated or fabricated reference
+
+If you cannot find enough verified sources, return fewer. Quality over quantity.
+Respond with ONLY valid JSON.`
 }
