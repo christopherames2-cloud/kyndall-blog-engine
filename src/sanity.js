@@ -1,6 +1,7 @@
 // kyndall-blog-engine/src/sanity.js
 // Sanity CMS Service with image upload support
 // NOW WITH getSanityClient() export for GEO migration module
+// UPDATED: Added references field for E-E-A-T and GEO
 
 import { createClient } from '@sanity/client'
 
@@ -205,6 +206,18 @@ export async function createDraftArticle(article) {
       answer: f.answer,
     })),
     
+    // References - for E-E-A-T and GEO authority signals
+    references: (article.references || []).map(ref => ({
+      _type: 'sourceReference',
+      _key: generateKey(),
+      title: ref.title,
+      publisher: ref.publisher,
+      url: ref.url,
+      note: ref.note || null,
+      supportedSections: ref.supportedSections || [],
+      dateAccessed: ref.dateAccessed || new Date().toISOString().split('T')[0],
+    })),
+    
     // SEO
     seoTitle: article.seoTitle || article.title,
     seoDescription: article.seoDescription || article.excerpt,
@@ -224,6 +237,7 @@ export async function createDraftArticle(article) {
   })
 
   const result = await client.create(doc)
+  console.log(`         References: ${article.references?.length || 0}`)
   return result
 }
 
