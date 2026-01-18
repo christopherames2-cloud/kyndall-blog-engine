@@ -180,6 +180,7 @@ export async function createDraftArticle(article) {
     } : undefined,
     
     // GEO Content - Critical for AI search optimization!
+    // Quick Answer is THE most important GEO field for featured snippets
     quickAnswer: article.quickAnswer || null,
     
     keyTakeaways: (article.keyTakeaways || []).map(t => ({
