@@ -16,6 +16,61 @@ export function initReferencesMigration(anthropicApiKey, sanityClientInstance) {
   anthropicClient = new Anthropic({ apiKey: anthropicApiKey })
   sanityClient = sanityClientInstance
   console.log('✅ References Migration module initialized')
+  
+  // Auto-run type migration on init (fixes old 'reference' -> 'sourceReference')
+  migrateReferenceTypes().catch(err => {
+    console.error('⚠️ Reference type migration error:', err.message)
+  })
+}
+
+// ============================================================
+// FIX OLD REFERENCE TYPES (one-time auto-migration)
+// ============================================================
+
+async function migrateReferenceTypes() {
+  if (!sanityClient) return
+  
+  console.log('🔧 Checking for old reference types to migrate...')
+  
+  // Find articles with references that have wrong _type
+  const articles = await sanityClient.fetch(`
+    *[_type == "article" && defined(references) && count(references) > 0] {
+      _id,
+      title,
+      references
+    }
+  `)
+  
+  let migrated = 0
+  
+  for (const article of articles) {
+    const needsMigration = article.references?.some(ref => ref._type === 'reference')
+    
+    if (!needsMigration) continue
+    
+    const updatedReferences = article.references.map(ref => ({
+      ...ref,
+      _type: 'sourceReference',
+    }))
+    
+    try {
+      await sanityClient
+        .patch(article._id)
+        .set({ references: updatedReferences })
+        .commit()
+      
+      migrated++
+      console.log(`   ✅ Fixed reference types: ${article.title.substring(0, 40)}...`)
+    } catch (error) {
+      console.error(`   ❌ Migration error for ${article._id}: ${error.message}`)
+    }
+  }
+  
+  if (migrated > 0) {
+    console.log(`🔧 Migrated ${migrated} article(s) to new reference type`)
+  } else {
+    console.log('🔧 No reference type migrations needed')
+  }
 }
 
 // ============================================================
