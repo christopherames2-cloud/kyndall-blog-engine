@@ -32,19 +32,23 @@ function getClient() {
  * Find related content for an article
  * Returns blog posts and articles that are topically related
  */
-export async function findRelatedContent(article, trend) {
+export async function findRelatedContent(articleTitle, articleCategory) {
   const sanityClient = getClient()
   
-  // Extract keywords for matching
-  const keywords = extractKeywords(article, trend)
+  // Handle undefined inputs
+  const title = articleTitle || ''
+  const category = articleCategory || 'lifestyle'
   
-  console.log(`         Keywords: ${keywords.slice(0, 5).join(', ')}...`)
+  // Extract keywords from title
+  const keywords = extractKeywordsFromTitle(title, category)
+  
+  console.log(`         Keywords: ${keywords.slice(0, 5).join(', ')}${keywords.length > 5 ? '...' : ''}`)
 
   // Find related blog posts
-  const blogPosts = await findRelatedBlogPosts(sanityClient, keywords, article.category)
+  const blogPosts = await findRelatedBlogPosts(sanityClient, keywords, category)
   
   // Find related articles
-  const articles = await findRelatedArticles(sanityClient, keywords, article.title)
+  const articles = await findRelatedArticles(sanityClient, keywords, title)
   
   console.log(`         Found ${blogPosts.length} related blog posts, ${articles.length} related articles`)
 
@@ -55,39 +59,27 @@ export async function findRelatedContent(article, trend) {
 }
 
 /**
- * Extract keywords from article content for matching
- * Now preserves important short keywords like "men", "oily", etc.
+ * Extract keywords from title and category
  */
-function extractKeywords(article, trend) {
+function extractKeywordsFromTitle(title, category) {
   const keywords = new Set()
   
   // Helper to check if word should be kept
   const shouldKeepWord = (w) => {
+    if (!w) return false
     if (PRESERVE_KEYWORDS.includes(w)) return true
     return w.length > 3
   }
   
-  // Add from trend
-  if (trend.topic) {
-    const words = trend.topic.toLowerCase().split(/\s+/)
+  // Add from title
+  if (title) {
+    const words = title.toLowerCase().split(/\s+/)
     words.forEach(w => shouldKeepWord(w) && keywords.add(w))
-  }
-  if (trend.tags) {
-    trend.tags.forEach(t => keywords.add(t.toLowerCase()))
-  }
-  
-  // Add from article
-  if (article.title) {
-    const words = article.title.toLowerCase().split(/\s+/)
-    words.forEach(w => shouldKeepWord(w) && keywords.add(w))
-  }
-  if (article.keywords) {
-    article.keywords.forEach(k => keywords.add(k.toLowerCase()))
   }
   
   // Add category
-  if (article.category) {
-    keywords.add(article.category)
+  if (category) {
+    keywords.add(category.toLowerCase())
   }
 
   return Array.from(keywords)
@@ -97,11 +89,14 @@ function extractKeywords(article, trend) {
  * Find related blog posts
  */
 async function findRelatedBlogPosts(client, keywords, category) {
+  // Ensure category is defined
+  const safeCategory = category || 'lifestyle'
+  
   // Build search conditions
   const searchTerms = keywords.slice(0, 10).map(k => `"${k}"`).join(', ')
   
-  // Query for related posts
-  const query = `*[_type == "blogPost" && status == "published"] | score(
+  // Query for related posts - use showInBlog instead of status
+  const query = `*[_type == "blogPost" && showInBlog == true] | score(
     title match [${searchTerms}],
     category == $category,
     excerpt match [${searchTerms}],
@@ -117,20 +112,20 @@ async function findRelatedBlogPosts(client, keywords, category) {
   }`
 
   try {
-    const results = await client.fetch(query, { category })
+    const results = await client.fetch(query, { category: safeCategory })
     
     // Filter out low-relevance results
     return results.filter(post => {
       const titleLower = (post.title || '').toLowerCase()
       const hasMatch = keywords.some(k => titleLower.includes(k))
-      return hasMatch || post.category === category
+      return hasMatch || post.category === safeCategory
     }).slice(0, 3)
   } catch (error) {
     console.log(`         Blog post search error: ${error.message}`)
     
     // Fallback: simple category match
     try {
-      const fallbackQuery = `*[_type == "blogPost" && status == "published" && category == $category] | order(publishedAt desc) [0...3] {
+      const fallbackQuery = `*[_type == "blogPost" && showInBlog == true && category == $category] | order(publishedAt desc) [0...3] {
         _id,
         title,
         "slug": slug.current,
@@ -138,7 +133,7 @@ async function findRelatedBlogPosts(client, keywords, category) {
         thumbnail,
         thumbnailUrl
       }`
-      return await client.fetch(fallbackQuery, { category })
+      return await client.fetch(fallbackQuery, { category: safeCategory })
     } catch (e) {
       return []
     }
@@ -149,9 +144,13 @@ async function findRelatedBlogPosts(client, keywords, category) {
  * Find related articles
  */
 async function findRelatedArticles(client, keywords, currentTitle) {
+  // Ensure currentTitle is defined
+  const safeTitle = currentTitle || ''
+  
   const searchTerms = keywords.slice(0, 10).map(k => `"${k}"`).join(', ')
   
-  const query = `*[_type == "article" && status == "published" && title != $currentTitle] | score(
+  // Query for related articles - use showOnSite instead of status
+  const query = `*[_type == "article" && showOnSite == true && title != $currentTitle] | score(
     title match [${searchTerms}],
     excerpt match [${searchTerms}]
   ) | order(_score desc) [0...3] {
@@ -163,7 +162,7 @@ async function findRelatedArticles(client, keywords, currentTitle) {
   }`
 
   try {
-    const results = await client.fetch(query, { currentTitle })
+    const results = await client.fetch(query, { currentTitle: safeTitle })
     
     // Filter for relevance
     return results.filter(article => {
