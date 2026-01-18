@@ -1,5 +1,6 @@
 // kyndall-blog-engine/src/sanity.js
 // Sanity CMS Service with image upload support
+// NOW WITH getSanityClient() export for GEO migration module
 
 import { createClient } from '@sanity/client'
 
@@ -16,6 +17,14 @@ export function initSanity(projectId, dataset, token) {
     apiVersion: '2024-01-01',
     useCdn: false,
   })
+}
+
+/**
+ * Export the client instance for other modules (like geo-migrate)
+ */
+export function getSanityClient() {
+  if (!client) throw new Error('Sanity client not initialized')
+  return client
 }
 
 /**
@@ -63,12 +72,67 @@ export async function uploadImageFromUrl(imageUrl, filename = 'article-image') {
 }
 
 /**
+ * Helper: Generate unique key for Sanity arrays
+ */
+function generateKey() {
+  return Math.random().toString(36).substring(2, 10)
+}
+
+/**
+ * Helper: Convert text to Portable Text blocks
+ */
+function ensurePortableText(content) {
+  if (!content) return []
+  
+  // If already portable text array, return as-is
+  if (Array.isArray(content)) return content
+  
+  // Convert string to portable text blocks
+  if (typeof content === 'string') {
+    // Split by double newlines for paragraphs
+    const paragraphs = content.split(/\n\n+/).filter(p => p.trim())
+    
+    return paragraphs.map(para => {
+      // Check if it's a header
+      const h2Match = para.match(/^##\s+(.+)$/)
+      const h3Match = para.match(/^###\s+(.+)$/)
+      
+      let style = 'normal'
+      let text = para.trim()
+      
+      if (h2Match) {
+        style = 'h2'
+        text = h2Match[1]
+      } else if (h3Match) {
+        style = 'h3'
+        text = h3Match[1]
+      }
+      
+      return {
+        _type: 'block',
+        _key: generateKey(),
+        style,
+        markDefs: [],
+        children: [
+          {
+            _type: 'span',
+            _key: generateKey(),
+            text,
+            marks: [],
+          },
+        ],
+      }
+    })
+  }
+  
+  return []
+}
+
+/**
  * Create a draft article in Sanity
  */
 export async function createDraftArticle(article) {
   if (!client) throw new Error('Sanity client not initialized')
-  
-  const generateKey = () => Math.random().toString(36).substring(2, 10)
 
   // Upload featured image if provided
   let featuredImage = null
@@ -109,34 +173,35 @@ export async function createDraftArticle(article) {
     
     // Kyndall's Take
     kyndallsTake: article.kyndallsTake ? {
+      showKyndallsTake: true,
       headline: article.kyndallsTake.headline || "Kyndall's Take",
-      content: ensurePortableText(article.kyndallsTake.content),
+      content: article.kyndallsTake.content,
       mood: article.kyndallsTake.mood || 'recommend',
-    } : null,
+    } : undefined,
     
-    // FAQ Section (with keys)
-    faqSection: (article.faqSection || []).map(faq => ({
-      _type: 'faqItem',
-      _key: generateKey(),
-      question: faq.question,
-      answer: faq.answer,
-    })),
+    // GEO Content - Critical for AI search optimization!
+    quickAnswer: article.quickAnswer || null,
     
-    // Key Takeaways (with keys)
-    keyTakeaways: (article.keyTakeaways || []).map(takeaway => ({
+    keyTakeaways: (article.keyTakeaways || []).map(t => ({
       _type: 'takeaway',
       _key: generateKey(),
-      point: takeaway.point,
-      icon: takeaway.icon || '✨',
+      point: t.point,
+      icon: t.icon || '✨',
     })),
     
-    // Expert Tips (with keys)
-    expertTips: (article.expertTips || []).map(tip => ({
+    expertTips: (article.expertTips || []).map(t => ({
       _type: 'tip',
       _key: generateKey(),
-      title: tip.title,
-      description: tip.description,
-      proTip: tip.proTip || null,
+      title: t.title,
+      description: t.description,
+      proTip: t.proTip || null,
+    })),
+    
+    faqSection: (article.faqSection || []).map(f => ({
+      _type: 'faqItem',
+      _key: generateKey(),
+      question: f.question,
+      answer: f.answer,
     })),
     
     // SEO
@@ -144,42 +209,18 @@ export async function createDraftArticle(article) {
     seoDescription: article.seoDescription || article.excerpt,
     keywords: article.keywords || [],
     
-    // Related content (references)
-    relatedBlogPosts: (article.relatedBlogPosts || []).map(post => ({
-      _type: 'reference',
-      _ref: post._id,
-      _key: generateKey(),
-    })),
-    relatedArticles: (article.relatedArticles || []).map(art => ({
-      _type: 'reference',
-      _ref: art._id,
-      _key: generateKey(),
-    })),
-    
-    // Trend source
-    trendSource: article.trendSource ? {
-      platform: article.trendSource.platform,
-      trendingTopic: article.trendSource.trendingTopic,
-      trendingScore: article.trendSource.trendingScore,
-      detectedAt: article.trendSource.detectedAt,
-    } : null,
-    
-    // Image credit (for Unsplash attribution - stored as separate field, NOT on featuredImage)
-    imageCredit: article.imageCredit ? {
-      name: article.imageCredit.name,
-      username: article.imageCredit.username,
-      photographerUrl: article.imageCredit.photographerUrl,
-      unsplashUrl: article.imageCredit.unsplashUrl,
-      source: 'Unsplash',
-    } : null,
-    
-    // Pre-formatted attribution for display
-    imageAttribution: article.attributionHtml || null,
-    
     // Metadata
     autoGenerated: true,
     publishedAt: article.publishedAt || new Date().toISOString(),
+    
+    // Image attribution (for Unsplash compliance)
+    imageAttribution: article.imageAttribution || null,
   }
+
+  // Remove undefined fields
+  Object.keys(doc).forEach(key => {
+    if (doc[key] === undefined) delete doc[key]
+  })
 
   const result = await client.create(doc)
   return result
@@ -188,73 +229,44 @@ export async function createDraftArticle(article) {
 /**
  * Get recent articles to avoid duplicates
  */
-export async function getRecentArticles(days = 30) {
+export async function getRecentArticles(days = 7) {
   if (!client) throw new Error('Sanity client not initialized')
   
-  const cutoffDate = new Date()
-  cutoffDate.setDate(cutoffDate.getDate() - days)
+  const since = new Date()
+  since.setDate(since.getDate() - days)
   
-  const query = `*[_type == "article" && publishedAt > $cutoffDate] | order(publishedAt desc) {
-    _id,
+  const query = `*[_type == "article" && publishedAt > $since] | order(publishedAt desc) {
     title,
-    category,
     "slug": slug.current,
-    trendSource
+    category,
+    publishedAt
   }`
-
-  return client.fetch(query, { cutoffDate: cutoffDate.toISOString() })
+  
+  return client.fetch(query, { since: since.toISOString() })
 }
 
 /**
- * Get article generation stats
+ * Get existing blog posts for internal linking
  */
-export async function getStats() {
+export async function getExistingContent() {
   if (!client) throw new Error('Sanity client not initialized')
   
   const query = `{
-    "totalArticles": count(*[_type == "article"]),
-    "visibleArticles": count(*[_type == "article" && showOnSite == true]),
-    "hiddenArticles": count(*[_type == "article" && showOnSite != true]),
-    "autoGenerated": count(*[_type == "article" && autoGenerated == true]),
-    "lastGenerated": *[_type == "article" && autoGenerated == true] | order(publishedAt desc)[0].publishedAt
+    "blogPosts": *[_type == "blogPost" && (showInBlog == true || showInVideos == true)] | order(publishedAt desc)[0...50] {
+      _id,
+      title,
+      "slug": slug.current,
+      category,
+      excerpt
+    },
+    "articles": *[_type == "article" && showOnSite == true] | order(publishedAt desc)[0...50] {
+      _id,
+      title,
+      "slug": slug.current,
+      category,
+      excerpt
+    }
   }`
-
+  
   return client.fetch(query)
-}
-
-/**
- * Ensure content is in Portable Text format
- */
-function ensurePortableText(content) {
-  if (!content) return []
-  if (Array.isArray(content)) {
-    return content.map(block => ({
-      ...block,
-      _key: block._key || Math.random().toString(36).substring(2, 10),
-      children: (block.children || []).map(child => ({
-        ...child,
-        _key: child._key || Math.random().toString(36).substring(2, 10),
-      })),
-    }))
-  }
-  
-  if (typeof content === 'string') {
-    const paragraphs = content.split(/\n\n+/).filter(p => p.trim())
-    return paragraphs.map(para => ({
-      _type: 'block',
-      _key: Math.random().toString(36).substring(2, 10),
-      style: 'normal',
-      children: [
-        {
-          _type: 'span',
-          _key: Math.random().toString(36).substring(2, 10),
-          text: para.trim(),
-          marks: [],
-        }
-      ],
-      markDefs: [],
-    }))
-  }
-  
-  return []
 }
