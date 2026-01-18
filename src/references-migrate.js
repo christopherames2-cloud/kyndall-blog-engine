@@ -161,7 +161,7 @@ Respond with ONLY valid JSON.`
       return refs
         .filter(ref => ref.title && ref.publisher && ref.url?.startsWith('http'))
         .map(ref => ({
-          _type: 'reference',
+          _type: 'sourceReference',
           _key: generateKey(),
           title: ref.title,
           publisher: ref.publisher,
