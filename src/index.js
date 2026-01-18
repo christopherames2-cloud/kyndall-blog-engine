@@ -1,6 +1,6 @@
 // kyndall-blog-engine/src/index.js
 // Web server version - trigger via HTTP endpoint from Sanity Studio or cron service
-// NOW WITH AUTO GEO MIGRATION - runs on startup and after each generation cycle
+// NOW WITH AUTO GEO MIGRATION + REFERENCES MIGRATION
 
 import http from 'http'
 import { fetchTikTokTrends } from './trends/tiktok.js'
@@ -11,6 +11,7 @@ import { findRelatedContent } from './linker/internal.js'
 import { initSanity, getSanityClient, createDraftArticle, getRecentArticles } from './sanity.js'
 import { searchUnsplashImage, trackDownload } from './images/unsplash.js'
 import { initGeoMigration, runGeoMigration } from './geo-migrate.js'
+import { initReferencesMigration, runReferencesMigration } from './references-migrate.js'
 
 // Configuration
 const CONFIG = {
@@ -28,7 +29,8 @@ const CONFIG = {
     'luxury', 'dupe', 'viral', 'tiktok made me buy', 'holy grail', 'must have'
   ],
   minRelevanceScore: 0.1,
-  geoMigrationMaxArticles: 5, // Max articles to migrate per run
+  geoMigrationMaxArticles: 5,
+  referencesMigrationMaxArticles: 5, // Max articles to add references per run
 }
 
 const PORT = process.env.PORT || 8080
@@ -39,6 +41,7 @@ let isRunning = false
 let lastRunResult = null
 let lastRunTime = null
 let lastGeoMigrationResult = null
+let lastReferencesMigrationResult = null
 
 // Initialize Sanity on startup
 const sanityProjectId = process.env.SANITY_PROJECT_ID
@@ -56,6 +59,9 @@ if (sanityProjectId && sanityToken) {
       const sanityClient = getSanityClient()
       initGeoMigration(anthropicApiKey, sanityClient)
       
+      // Initialize References Migration module
+      initReferencesMigration(anthropicApiKey, sanityClient)
+      
       // Run GEO migration on startup (non-blocking)
       console.log('🎯 Running startup GEO migration check...')
       runGeoMigration(CONFIG.geoMigrationMaxArticles)
@@ -66,11 +72,23 @@ if (sanityProjectId && sanityToken) {
         .catch(err => {
           console.error('⚠️ Startup GEO migration error:', err.message)
         })
+      
+      // Run References migration on startup (non-blocking)
+      console.log('📚 Running startup References migration check...')
+      runReferencesMigration(CONFIG.referencesMigrationMaxArticles)
+        .then(result => {
+          lastReferencesMigrationResult = result
+          console.log(`✅ Startup References migration complete: ${result.updated} updated, ${result.errors} errors`)
+        })
+        .catch(err => {
+          console.error('⚠️ Startup References migration error:', err.message)
+        })
+        
     } catch (err) {
-      console.error('⚠️ Could not initialize GEO migration:', err.message)
+      console.error('⚠️ Could not initialize migration modules:', err.message)
     }
   } else {
-    console.warn('⚠️ Missing ANTHROPIC_API_KEY - GEO migration disabled')
+    console.warn('⚠️ Missing ANTHROPIC_API_KEY - GEO and References migration disabled')
   }
 } else {
   console.error('⚠️ Missing Sanity credentials - will fail on run')
@@ -97,6 +115,7 @@ async function runArticleGeneration() {
     errors: [],
     trends: { tiktok: 0, youtube: 0, instagram: 0 },
     geoMigration: null,
+    referencesMigration: null,
   }
 
   try {
@@ -191,8 +210,13 @@ async function runArticleGeneration() {
       console.log(`      Platform: ${trend.platform}, Score: ${trend.relevanceScore.toFixed(2)}`)
       
       try {
-        // Generate article content
+        // Generate article content (now includes references!)
         const article = await generateArticle(trend)
+        
+        // Log references generated
+        if (article.references && article.references.length > 0) {
+          console.log(`      📚 References: ${article.references.length} sources`)
+        }
         
         // Find related content for internal linking
         console.log(`      🔗 Finding related content...`)
@@ -241,6 +265,18 @@ async function runArticleGeneration() {
       result.geoMigration = { updated: 0, errors: 1, error: err.message }
     }
 
+    // Step 6: Run References migration for any articles missing references
+    console.log('\n📚 Running post-generation References migration...')
+    try {
+      const refResult = await runReferencesMigration(CONFIG.referencesMigrationMaxArticles)
+      result.referencesMigration = refResult
+      lastReferencesMigrationResult = refResult
+      console.log(`   References Migration: ${refResult.updated} articles updated, ${refResult.errors} errors`)
+    } catch (err) {
+      console.log(`   ⚠️ References Migration error: ${err.message}`)
+      result.referencesMigration = { updated: 0, errors: 1, error: err.message }
+    }
+
     // Summary
     console.log('\n═══════════════════════════════════════════════════════════════')
     console.log('📊 Generation Complete!')
@@ -248,6 +284,9 @@ async function runArticleGeneration() {
     console.log(`   Errors: ${result.errors.length}`)
     if (result.geoMigration) {
       console.log(`   GEO backfills: ${result.geoMigration.updated}`)
+    }
+    if (result.referencesMigration) {
+      console.log(`   References backfills: ${result.referencesMigration.updated}`)
     }
     console.log('═══════════════════════════════════════════════════════════════')
 
@@ -297,6 +336,7 @@ const server = http.createServer(async (req, res) => {
       lastRunTime,
       lastRunResult,
       lastGeoMigrationResult,
+      lastReferencesMigrationResult,
     }))
     return
   }
@@ -345,7 +385,7 @@ const server = http.createServer(async (req, res) => {
     return
   }
 
-  // Manual GEO migration endpoint (for testing/maintenance)
+  // Manual GEO migration endpoint
   if (url.pathname === '/geo-migrate') {
     // Check auth
     const authHeader = req.headers.authorization || ''
@@ -382,6 +422,59 @@ const server = http.createServer(async (req, res) => {
     return
   }
 
+  // Manual References migration endpoint
+  if (url.pathname === '/backfill-references') {
+    // Check auth
+    const authHeader = req.headers.authorization || ''
+    const token = authHeader.replace('Bearer ', '')
+    
+    if (token !== API_SECRET) {
+      res.writeHead(401, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ error: 'Unauthorized' }))
+      return
+    }
+
+    if (req.method !== 'POST') {
+      res.writeHead(405, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ error: 'Method not allowed. Use POST.' }))
+      return
+    }
+
+    if (isRunning) {
+      res.writeHead(409, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ 
+        error: 'Another job is running',
+        message: 'Please wait for the current job to complete.',
+        isRunning: true
+      }))
+      return
+    }
+
+    console.log('📚 Manual References migration triggered...')
+    
+    // Run async and respond immediately
+    res.writeHead(202, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({
+      message: '📚 References backfill started!',
+      status: 'started',
+      maxArticles: CONFIG.referencesMigrationMaxArticles,
+      checkStatusAt: '/status'
+    }))
+
+    // Run in background
+    runReferencesMigration(CONFIG.referencesMigrationMaxArticles)
+      .then(result => {
+        lastReferencesMigrationResult = result
+        console.log(`📚 References migration complete: ${result.updated} updated, ${result.errors} errors`)
+      })
+      .catch(err => {
+        console.error('📚 References migration error:', err.message)
+        lastReferencesMigrationResult = { updated: 0, errors: 1, error: err.message }
+      })
+    
+    return
+  }
+
   // 404
   res.writeHead(404, { 'Content-Type': 'application/json' })
   res.end(JSON.stringify({ error: 'Not found' }))
@@ -393,10 +486,11 @@ server.listen(PORT, () => {
   console.log(`📡 Listening on port ${PORT}`)
   console.log('═══════════════════════════════════════════════════════════════')
   console.log('Endpoints:')
-  console.log(`  GET  /health      - Health check`)
-  console.log(`  GET  /status      - Job status & last run info`)
-  console.log(`  POST /generate    - Trigger article generation (requires auth)`)
-  console.log(`  POST /geo-migrate - Manual GEO migration (requires auth)`)
+  console.log(`  GET  /health             - Health check`)
+  console.log(`  GET  /status             - Job status & last run info`)
+  console.log(`  POST /generate           - Trigger article generation (requires auth)`)
+  console.log(`  POST /geo-migrate        - Manual GEO migration (requires auth)`)
+  console.log(`  POST /backfill-references - Add references to articles (requires auth)`)
   console.log('═══════════════════════════════════════════════════════════════')
 })
 
