@@ -1,11 +1,12 @@
 // kyndall-blog-engine/src/generator/prompts.js
 // GEO-optimized prompts for generating high-quality articles with Kyndall's voice
+// NOW WITH quickAnswer generation for featured snippets
 
 // Get current year dynamically
 const CURRENT_YEAR = new Date().getFullYear()
 
 /**
- * Main article content prompt
+ * Main article content prompt - NOW INCLUDES quickAnswer
  */
 export function getArticlePrompt(topic, platform, tags) {
   return `You are writing a beauty/lifestyle article for Kyndall Ames, a popular LA-based beauty content creator with 2M+ followers.
@@ -33,198 +34,126 @@ OUTPUT FORMAT (respond in this exact JSON structure):
 {
   "title": "Compelling, slightly playful title (50-60 chars) - can use colons, questions, or 'The' starters",
   "excerpt": "Engaging hook that sounds like Kyndall talking - make people want to keep reading (150-200 chars)",
+  "quickAnswer": "TL;DR summary in 2-3 sentences. This is THE most important GEO field - it appears in a highlighted box and gets extracted by AI search engines. Be specific and helpful. 150-300 characters.",
   "introduction": "2-3 paragraphs setting up the topic conversationally. Start with something relatable or a hook. Establish why this matters right now. Preview what they'll learn without being dry about it.",
-  "content": "Main article body with 4-6 sections. Headers should be conversational (not 'Step 1: Do X'). Be specific and actionable but SOUND like a person, not a textbook. Include product recommendations naturally. 800-1200 words total.",
-  "seoTitle": "SEO-optimized title with primary keyword (50-60 chars)",
-  "seoDescription": "Meta description with keyword and personality (150-160 chars)",
-  "keywords": ["primary keyword", "secondary keyword", "related term 1", "related term 2", "related term 3"]
+  "content": "Main article body with 4-6 sections. Headers should be conversational (not 'Step 1: Do X'). Be specific and actionable but SOUND like a person, not a textbook. Include product recommendations naturally. 800-1200 words total. Use markdown headers (## for H2, ### for H3).",
+  "seoTitle": "SEO-optimized title (50-60 chars) - can differ from the main title",
+  "seoDescription": "Meta description for search engines (150-160 chars)",
+  "keywords": ["keyword1", "keyword2", "keyword3", "keyword4", "keyword5"]
 }
 
-WRITING STYLE GUIDELINES:
-- Write like you're talking to a friend, not giving a lecture
-- Use "you" and "your" freely - make it personal
-- Short paragraphs (2-4 sentences max) - easy to skim
-- Vary sentence length - mix punchy short ones with longer explanations
-- Include the "why" but make it interesting, not clinical
-- Okay to use casual phrases: "here's the deal", "spoiler alert", "game-changer", "not gonna lie"
-- Product mentions should feel like genuine recommendations, not ads
-- Headers should be engaging, not boring (e.g., "The Lazy Girl's Secret Weapon" not "Step 3: Apply Moisturizer")
-
-WHAT TO AVOID:
-- Clinical/medical textbook language ("trans-epidermal water loss", "dermatological studies show")
-- Stiff formal phrases ("it is important to note", "one should consider")
-- Boring step-by-step headers ("Step 1:", "Step 2:")
-- Walls of text - break it up!
-- Being preachy or condescending
-- Generic advice that could apply to anyone
-
-EXAMPLE GOOD VS BAD:
-
-❌ BAD (clinical): "Dermatological research indicates that the skin barrier requires approximately 28 days to undergo complete cellular turnover."
-
-✅ GOOD (Kyndall): "Here's something I wish someone told me sooner: your skin needs about a month to really show changes. I know, I know - we all want overnight results. But trust the process, babe."
-
-❌ BAD header: "Step 1: The 7-Day Simplification Period"
-✅ GOOD header: "Week One: Strip It Back (Trust Me)"
-
-❌ BAD header: "Strategic Active Ingredient Reintroduction"  
-✅ GOOD header: "Slowly Bringing Back the Good Stuff"
-
-YEAR REFERENCES:
-- Current year is ${CURRENT_YEAR}
-- Prefer timeless titles unless topic is specifically about trends
-- Can reference "this year" or "lately" instead of the specific year
-
-GEO OPTIMIZATION (do this while keeping the voice):
-- Make clear, quotable statements AI can extract
-- Define trendy terms when first used (but casually)
-- Include specific details (ingredients, timing, techniques)
-- Structure info so AI can understand and cite it`
+Respond with ONLY valid JSON (no markdown backticks, no explanation).`
 }
 
 /**
- * FAQ section prompt - CRITICAL for GEO
+ * FAQ generation prompt
  */
 export function getFAQPrompt(topic, excerpt) {
-  return `Generate 5-7 FAQ items for an article about: "${topic}"
+  return `Generate 5 frequently asked questions about "${topic}" for a beauty/lifestyle article.
 
-Context: ${excerpt}
-Current Year: ${CURRENT_YEAR}
+CONTEXT: ${excerpt}
 
-These FAQs are CRITICAL for GEO (Generative Engine Optimization). AI engines frequently extract and cite FAQ content.
+These FAQs are CRITICAL for GEO (Generative Engine Optimization). AI search engines extract these directly for featured snippets.
 
-Keep Kyndall's conversational voice in the answers - informative but warm and relatable.
+Requirements:
+- Questions should be what real people actually ask
+- Answers should be helpful, specific, and 2-3 sentences each
+- Write in Kyndall's warm, conversational voice
+- Include practical, actionable advice
 
-OUTPUT FORMAT (respond as JSON array):
-[
-  {
-    "question": "Natural question users would actually search for",
-    "answer": "Clear, helpful answer in 2-3 sentences. Be specific but sound like a real person giving advice, not a medical pamphlet."
-  }
-]
-
-GUIDELINES FOR EFFECTIVE FAQs:
-1. Questions should sound like what real people type into Google
-2. Answers should be helpful AND sound human
-3. Include specific details (ingredients, timeframes, techniques)
-4. Be definitive when possible - people want real answers
-5. Each answer should be 40-80 words
-6. Okay to use casual language: "honestly", "the key is", "most people find that"
-
-QUESTION TYPES TO INCLUDE:
-- "What is..." (definition)
-- "How do you..." (how-to)
-- "Is it okay to..." (permission/validation)
-- "What's the best..." (recommendations)
-- "How long does it take..." (expectations)
-- "Can I..." (common concerns)
-
-EXAMPLE GOOD FAQ:
-Q: "How often should you use retinol?"
-A: "Start slow - like 2-3 times a week max. Your skin needs time to get used to it! After about a month, you can bump it up to every night if your skin's handling it well. And always, always moisturize after. Your skin will thank you."`
-}
-
-/**
- * Key Takeaways prompt
- */
-export function getTakeawayPrompt(topic, excerpt) {
-  return `Generate 3-5 key takeaways for an article about: "${topic}"
-
-Context: ${excerpt}
-Current Year: ${CURRENT_YEAR}
-
-These should be the "aha moments" readers remember and want to share.
-
-OUTPUT FORMAT (respond as JSON array):
-[
-  {
-    "point": "Clear, memorable takeaway that sounds like friendly advice (under 100 chars)",
-    "icon": "emoji that matches the vibe (✨💡⭐🎯💕🔥✅💖🙌)"
-  }
-]
-
-GUIDELINES:
-- Should sound like tips you'd text your bestie
-- Specific and actionable, not generic fluff
-- Mix of practical ("do this") and mindset ("remember this")
-- Make them quotable/shareable
-
-EXAMPLE GOOD TAKEAWAYS:
-✨ "Your skin needs a full month to show real changes - patience is everything"
-💡 "One new product at a time, always. Your skin will tell you what it loves"
-🔥 "Hydration layering isn't extra - it's the secret to that glass skin look"
-💕 "Consistency beats intensity every single time"`
-}
-
-/**
- * Expert Tips prompt
- */
-export function getTipsPrompt(topic) {
-  return `Generate 3-4 expert tips for: "${topic}"
-
-Current Year: ${CURRENT_YEAR}
-
-These tips should feel like insider secrets from someone who really knows their stuff - but shared in a friendly, accessible way.
-
-OUTPUT FORMAT (respond as JSON array):
-[
-  {
-    "title": "Short, catchy tip title (5-8 words)",
-    "description": "The actual tip with specific how-to details. Sound like you're sharing a secret with a friend, not reading from a textbook. (2-3 sentences)",
-    "proTip": "Optional extra insider knowledge for the overachievers (1 sentence, or null)"
-  }
-]
-
-GUIDELINES:
-- Tips should feel like "omg why didn't anyone tell me this sooner"
-- Be specific - vague tips are useless tips
-- The proTip is for the beauty nerds who want to go deeper
-- Keep it real and actionable
-
-EXAMPLE GOOD TIP:
+OUTPUT FORMAT (respond with ONLY valid JSON, no markdown):
 {
-  "title": "The Damp Skin Trick That Changes Everything",
-  "description": "Apply your serums and moisturizers while your skin is still slightly damp from cleansing. It helps everything absorb way better and your products actually work harder. Game-changer for dry skin especially.",
-  "proTip": "For extra glow, mist your face with a hydrating toner between each layer."
+  "faqs": [
+    { "question": "Natural question people would ask?", "answer": "Helpful 2-3 sentence answer." },
+    { "question": "Another common question?", "answer": "Another helpful answer." },
+    { "question": "Third question?", "answer": "Answer with specific advice." },
+    { "question": "Fourth question?", "answer": "Practical answer." },
+    { "question": "Fifth question?", "answer": "Final helpful answer." }
+  ]
 }`
 }
 
 /**
- * Kyndall's Take prompt - adds unique perspective
+ * Key Takeaways generation prompt
+ */
+export function getTakeawayPrompt(topic, excerpt) {
+  return `Generate 4-5 key takeaways for an article about "${topic}".
+
+CONTEXT: ${excerpt}
+
+These are quick, memorable points that appear in a highlighted box. They should be:
+- Specific and actionable (not generic advice)
+- Easy to scan and remember
+- Written like Kyndall would say them
+
+OUTPUT FORMAT (respond with ONLY valid JSON, no markdown):
+{
+  "takeaways": [
+    { "icon": "✨", "point": "First key takeaway - specific and memorable" },
+    { "icon": "💧", "point": "Second key takeaway" },
+    { "icon": "☀️", "point": "Third takeaway with actionable advice" },
+    { "icon": "💕", "point": "Fourth takeaway" }
+  ]
+}
+
+Choose icons that match the content (beauty emojis like ✨💄💋🧴💧☀️🌙💅💇‍♀️💕💎🌸).`
+}
+
+/**
+ * Expert Tips generation prompt
+ */
+export function getTipsPrompt(topic) {
+  return `Generate 2-3 expert tips about "${topic}" for Kyndall Ames' beauty/lifestyle blog.
+
+These should be genuine pro tips that establish authority while staying conversational.
+
+Each tip needs:
+- A catchy title (3-6 words)
+- A helpful description (2-3 sentences)
+- An optional "pro tip" one-liner (insider knowledge)
+
+OUTPUT FORMAT (respond with ONLY valid JSON, no markdown):
+{
+  "tips": [
+    {
+      "title": "Catchy Tip Title Here",
+      "description": "2-3 sentences explaining the tip in Kyndall's voice. Be specific and helpful.",
+      "proTip": "One-liner insider tip (or null if not needed)"
+    },
+    {
+      "title": "Second Tip Title",
+      "description": "Description of the second tip.",
+      "proTip": null
+    }
+  ]
+}`
+}
+
+/**
+ * Kyndall's Take generation prompt
  */
 export function getKyndallsTakePrompt(topic, platform) {
-  return `Write "Kyndall's Take" - a personal perspective section for an article about: "${topic}"
+  return `Write "Kyndall's Take" - a personal perspective section for an article about "${topic}".
 
-This is the most important section for authenticity - it's what makes the article KYNDALL'S, not just generic content.
+This section is what differentiates the article from generic AI content. It should:
+- Be authentic and personal (first person)
+- Share a genuine opinion or experience
+- Use Kyndall's conversational voice
+- Be 2-4 sentences
 
-ABOUT KYNDALL:
-- LA-based beauty creator with 2M+ followers
-- Known for being real and honest - no fake enthusiasm
-- Loves finding what actually works (drugstore or luxury)
-- Part of the ${platform} beauty community
-- Her followers trust her because she keeps it 100
+This is trending on ${platform}, so you can reference that.
 
-CURRENT YEAR: ${CURRENT_YEAR}
-
-OUTPUT FORMAT (respond as JSON):
+OUTPUT FORMAT (respond with ONLY valid JSON, no markdown):
 {
-  "headline": "Something that sounds like her - 'Real Talk', 'My Honest Take', 'Okay But Actually...', 'Here's What I Really Think' (3-6 words)",
-  "content": "2-3 paragraphs of genuine perspective. Share what you actually think about this trend/topic. Be honest - if something is overhyped, say so. If you're obsessed, show that enthusiasm. Include specific observations. Can reference trying things, community reactions, or what you've seen work. 150-250 words.",
+  "headline": "Short catchy headline (e.g., 'My Honest Take', 'Real Talk', 'The Truth Is...')",
+  "content": "2-4 sentences of Kyndall's personal perspective. First person, casual, authentic. Share a real opinion.",
   "mood": "love|recommend|mixed|caution|skip"
 }
 
-TONE:
-- This should sound the MOST like Kyndall talking
-- Honest opinions - not everything is "amazing"
-- Specific observations ("I noticed that...", "What actually works is...")
-- Can be opinionated - that's the point
-- Reference the ${platform} community naturally
-- End with clear guidance (what to try, what to skip, who this is for)
-
-EXAMPLE OPENERS:
-- "Okay real talk? I was skeptical about this at first..."
-- "The ${platform} girlies are going crazy for this and honestly? I get it."
-- "I've been testing this for weeks now and here's where I've landed..."
-- "This is one of those trends that sounds better than it actually is..."
-- "Not gonna lie, this one exceeded my expectations..."`
+Mood options:
+- love: She absolutely loves this
+- recommend: She thinks it's worth trying
+- mixed: She has some reservations
+- caution: Proceed carefully
+- skip: Not for everyone`
 }
