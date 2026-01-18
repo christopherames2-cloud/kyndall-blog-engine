@@ -1,5 +1,6 @@
 // kyndall-blog-engine/src/index.js
 // Web server version - trigger via HTTP endpoint from Sanity Studio or cron service
+// NOW WITH AUTO GEO MIGRATION - runs on startup and after each generation cycle
 
 import http from 'http'
 import { fetchTikTokTrends } from './trends/tiktok.js'
@@ -7,8 +8,9 @@ import { fetchYouTubeTrends } from './trends/youtube.js'
 import { fetchInstagramTrends } from './trends/instagram.js'
 import { generateArticle } from './generator/article.js'
 import { findRelatedContent } from './linker/internal.js'
-import { initSanity, createDraftArticle, getRecentArticles } from './sanity.js'
+import { initSanity, getSanityClient, createDraftArticle, getRecentArticles } from './sanity.js'
 import { searchUnsplashImage, trackDownload } from './images/unsplash.js'
+import { initGeoMigration, runGeoMigration } from './geo-migrate.js'
 
 // Configuration
 const CONFIG = {
@@ -26,6 +28,7 @@ const CONFIG = {
     'luxury', 'dupe', 'viral', 'tiktok made me buy', 'holy grail', 'must have'
   ],
   minRelevanceScore: 0.1,
+  geoMigrationMaxArticles: 5, // Max articles to migrate per run
 }
 
 const PORT = process.env.PORT || 8080
@@ -35,15 +38,40 @@ const API_SECRET = process.env.API_SECRET || 'kyndall-blog-engine-secret'
 let isRunning = false
 let lastRunResult = null
 let lastRunTime = null
+let lastGeoMigrationResult = null
 
 // Initialize Sanity on startup
 const sanityProjectId = process.env.SANITY_PROJECT_ID
 const sanityDataset = process.env.SANITY_DATASET || 'production'
 const sanityToken = process.env.SANITY_TOKEN
+const anthropicApiKey = process.env.ANTHROPIC_API_KEY
 
 if (sanityProjectId && sanityToken) {
   initSanity(sanityProjectId, sanityDataset, sanityToken)
   console.log('✅ Sanity client initialized')
+  
+  // Initialize GEO Migration module
+  if (anthropicApiKey) {
+    try {
+      const sanityClient = getSanityClient()
+      initGeoMigration(anthropicApiKey, sanityClient)
+      
+      // Run GEO migration on startup (non-blocking)
+      console.log('🎯 Running startup GEO migration check...')
+      runGeoMigration(CONFIG.geoMigrationMaxArticles)
+        .then(result => {
+          lastGeoMigrationResult = result
+          console.log(`✅ Startup GEO migration complete: ${result.updated} updated, ${result.errors} errors`)
+        })
+        .catch(err => {
+          console.error('⚠️ Startup GEO migration error:', err.message)
+        })
+    } catch (err) {
+      console.error('⚠️ Could not initialize GEO migration:', err.message)
+    }
+  } else {
+    console.warn('⚠️ Missing ANTHROPIC_API_KEY - GEO migration disabled')
+  }
 } else {
   console.error('⚠️ Missing Sanity credentials - will fail on run')
 }
@@ -52,300 +80,236 @@ if (sanityProjectId && sanityToken) {
 
 async function runArticleGeneration() {
   if (isRunning) {
-    return { success: false, message: 'Job already running. Please wait.', status: 'busy' }
+    return { success: false, message: 'Job already running. Please wait.' }
   }
 
   isRunning = true
-  const startTime = Date.now()
+  lastRunTime = new Date().toISOString()
   
   console.log('═══════════════════════════════════════════════════════════════')
-  console.log('🚀 Kyndall Blog Engine - Starting article generation')
-  console.log(`📅 ${new Date().toLocaleString('en-US', { timeZone: 'America/Los_Angeles' })} PST`)
+  console.log('🚀 Starting Article Generation')
+  console.log(`   Time: ${lastRunTime}`)
   console.log('═══════════════════════════════════════════════════════════════')
 
+  const result = {
+    success: true,
+    articlesCreated: 0,
+    errors: [],
+    trends: { tiktok: 0, youtube: 0, instagram: 0 },
+    geoMigration: null,
+  }
+
   try {
-    // Get recent articles to avoid duplicates
-    const recentArticles = await getRecentArticles(30)
-    const recentTopics = recentArticles.map(a => a.title?.toLowerCase() || '')
-    console.log(`📚 Found ${recentArticles.length} recent articles to check against`)
-
-    // Step 1: Fetch trending topics
-    console.log('\n📊 STEP 1: Fetching trending topics...')
+    // Step 1: Fetch trends from all sources
+    console.log('\n📊 Fetching trending topics...')
     
-    const allTrends = []
-
-    // TikTok trends
-    if (process.env.TIKTOK_CLIENT_KEY && process.env.TIKTOK_CLIENT_SECRET) {
-      console.log('\n🎵 Fetching TikTok trends...')
+    let allTrends = []
+    
+    if (CONFIG.trendSources.includes('tiktok')) {
       try {
         const tiktokTrends = await fetchTikTokTrends()
-        console.log(`   Found ${tiktokTrends.length} TikTok trends`)
-        allTrends.push(...tiktokTrends.map(t => ({ ...t, platform: 'tiktok' })))
-      } catch (error) {
-        console.error('   ⚠️ TikTok fetch failed:', error.message)
+        result.trends.tiktok = tiktokTrends.length
+        allTrends = [...allTrends, ...tiktokTrends.map(t => ({ ...t, platform: 'tiktok' }))]
+        console.log(`   TikTok: ${tiktokTrends.length} trends`)
+      } catch (err) {
+        console.log(`   TikTok: Error - ${err.message}`)
+        result.errors.push(`TikTok: ${err.message}`)
       }
-    } else {
-      console.log('   ⏭️ Skipping TikTok (no credentials)')
     }
-
-    // YouTube trends
-    if (process.env.YOUTUBE_API_KEY) {
-      console.log('\n📺 Fetching YouTube trends...')
+    
+    if (CONFIG.trendSources.includes('youtube')) {
       try {
         const youtubeTrends = await fetchYouTubeTrends()
-        console.log(`   Found ${youtubeTrends.length} YouTube trends`)
-        allTrends.push(...youtubeTrends.map(t => ({ ...t, platform: 'youtube' })))
-      } catch (error) {
-        console.error('   ⚠️ YouTube fetch failed:', error.message)
+        result.trends.youtube = youtubeTrends.length
+        allTrends = [...allTrends, ...youtubeTrends.map(t => ({ ...t, platform: 'youtube' }))]
+        console.log(`   YouTube: ${youtubeTrends.length} trends`)
+      } catch (err) {
+        console.log(`   YouTube: Error - ${err.message}`)
+        result.errors.push(`YouTube: ${err.message}`)
       }
-    } else {
-      console.log('   ⏭️ Skipping YouTube (no API key)')
     }
-
-    // Instagram trends (placeholder)
-    if (process.env.INSTAGRAM_ACCESS_TOKEN) {
-      console.log('\n📸 Fetching Instagram trends...')
+    
+    if (CONFIG.trendSources.includes('instagram')) {
       try {
         const instagramTrends = await fetchInstagramTrends()
-        console.log(`   Found ${instagramTrends.length} Instagram trends`)
-        allTrends.push(...instagramTrends.map(t => ({ ...t, platform: 'instagram' })))
-      } catch (error) {
-        console.error('   ⚠️ Instagram fetch failed:', error.message)
+        result.trends.instagram = instagramTrends.length
+        allTrends = [...allTrends, ...instagramTrends.map(t => ({ ...t, platform: 'instagram' }))]
+        console.log(`   Instagram: ${instagramTrends.length} trends`)
+      } catch (err) {
+        console.log(`   Instagram: Error - ${err.message}`)
+        result.errors.push(`Instagram: ${err.message}`)
       }
-    } else {
-      console.log('   ⏭️ Skipping Instagram (not configured yet)')
     }
 
     if (allTrends.length === 0) {
-      isRunning = false
-      lastRunResult = { success: false, message: 'No trends fetched from any source', articlesGenerated: 0 }
-      lastRunTime = new Date().toISOString()
-      return lastRunResult
+      result.success = false
+      result.message = 'No trends found from any source'
+      return result
     }
-
-    console.log(`\n📈 Total trends collected: ${allTrends.length}`)
 
     // Step 2: Score and filter trends
-    console.log('\n🎯 STEP 2: Scoring trends for beauty/lifestyle relevance...')
+    console.log('\n🎯 Scoring trends for relevance...')
     
-    const scoredTrends = allTrends.map(trend => {
-      const relevanceScore = calculateRelevanceScore(trend, CONFIG.beautyKeywords)
-      return { ...trend, relevanceScore }
-    })
-
+    const scoredTrends = allTrends.map(trend => ({
+      ...trend,
+      relevanceScore: calculateRelevanceScore(trend, CONFIG.beautyKeywords)
+    }))
+    
     const relevantTrends = scoredTrends
       .filter(t => t.relevanceScore >= CONFIG.minRelevanceScore)
-      .sort((a, b) => {
-        const aScore = a.relevanceScore * (a.trendingScore || 1)
-        const bScore = b.relevanceScore * (b.trendingScore || 1)
-        return bScore - aScore
-      })
-
-    console.log(`   ${relevantTrends.length} trends passed relevance filter`)
-
-    // Step 3: Filter duplicates
-    console.log('\n🔍 STEP 3: Filtering out already-covered topics...')
+      .sort((a, b) => b.relevanceScore - a.relevanceScore)
+      .slice(0, CONFIG.articlesToGenerate)
     
-    const newTrends = relevantTrends.filter(trend => {
-      const topicLower = (trend.topic || trend.title || '').toLowerCase()
-      const topicWords = topicLower.split(/\s+/).filter(w => w.length > 3)
-      
-      const alreadyCovered = recentTopics.some(recent => {
-        const recentWords = recent.split(/\s+/).filter(w => w.length > 3)
-        if (recentWords.length === 0 || topicWords.length === 0) return false
-        
-        const matchingWords = topicWords.filter(w => recentWords.includes(w))
-        const overlapRatio = matchingWords.length / Math.min(topicWords.length, recentWords.length)
-        
-        return overlapRatio >= 0.7
-      })
-      
-      if (alreadyCovered) {
-        console.log(`   ⏭️ Skipping "${trend.topic}" (too similar to existing article)`)
-      }
-      return !alreadyCovered
-    })
+    console.log(`   ${relevantTrends.length} relevant trends selected`)
 
-    console.log(`   ${newTrends.length} new topics to potentially cover`)
-
-    const selectedTrends = newTrends.slice(0, CONFIG.articlesToGenerate)
-    
-    if (selectedTrends.length === 0) {
-      isRunning = false
-      lastRunResult = { 
-        success: true, 
-        message: 'No new relevant trends to write about today.', 
-        articlesGenerated: 0,
-        trendsChecked: allTrends.length
-      }
-      lastRunTime = new Date().toISOString()
-      console.log('\n✅ No new relevant trends to write about today.')
-      return lastRunResult
+    if (relevantTrends.length === 0) {
+      result.success = false
+      result.message = 'No relevant beauty/lifestyle trends found'
+      return result
     }
 
-    console.log(`\n📝 Selected ${selectedTrends.length} topics for article generation:`)
-    selectedTrends.forEach((t, i) => {
-      console.log(`   ${i + 1}. [${t.platform}] ${t.topic} (relevance: ${(t.relevanceScore * 100).toFixed(0)}%)`)
+    // Step 3: Check for recent duplicates
+    console.log('\n🔍 Checking for duplicates...')
+    const recentArticles = await getRecentArticles(7)
+    const recentTitles = recentArticles.map(a => a.title.toLowerCase())
+    
+    const uniqueTrends = relevantTrends.filter(trend => {
+      const topic = (trend.topic || trend.title || '').toLowerCase()
+      return !recentTitles.some(title => 
+        title.includes(topic) || topic.includes(title)
+      )
     })
+    
+    console.log(`   ${uniqueTrends.length} unique topics (${relevantTrends.length - uniqueTrends.length} duplicates removed)`)
 
     // Step 4: Generate articles
-    console.log('\n✍️ STEP 4: Generating articles with Claude AI...')
+    console.log('\n✍️ Generating articles...')
     
-    const generatedArticles = []
-    
-    for (let i = 0; i < selectedTrends.length; i++) {
-      const trend = selectedTrends[i]
-      console.log(`\n   📄 Article ${i + 1}/${selectedTrends.length}: "${trend.topic}"`)
+    for (let i = 0; i < Math.min(uniqueTrends.length, CONFIG.articlesToGenerate); i++) {
+      const trend = uniqueTrends[i]
+      console.log(`\n   [${i + 1}/${Math.min(uniqueTrends.length, CONFIG.articlesToGenerate)}] "${trend.topic || trend.title}"`)
+      console.log(`      Platform: ${trend.platform}, Score: ${trend.relevanceScore.toFixed(2)}`)
       
       try {
+        // Generate article content
         const article = await generateArticle(trend)
-        console.log(`      ✅ Generated: "${article.title}"`)
         
-        // Fetch featured image from Unsplash
-        console.log(`      🖼️ Fetching featured image...`)
-        const image = await searchUnsplashImage(trend.topic, article.category)
-        if (image) {
-          article.featuredImageUrl = image.url
-          article.featuredImageAlt = image.alt
-          article.imageCredit = image.credit
-          article.attributionHtml = image.attributionHtml
-          // Track download per Unsplash API guidelines
-          await trackDownload(image.downloadUrl)
-          console.log(`      ✅ Image found: "${image.alt}"`)
-        } else {
-          console.log(`      ⚠️ No image found - article will have no featured image`)
+        // Find related content for internal linking
+        console.log(`      🔗 Finding related content...`)
+        const relatedContent = await findRelatedContent(article.title, article.category)
+        article.relatedPosts = relatedContent
+        
+        // Get featured image from Unsplash
+        console.log(`      🖼️ Searching for featured image...`)
+        const imageResult = await searchUnsplashImage(trend.topic || trend.title, article.category)
+        if (imageResult) {
+          article.featuredImageUrl = imageResult.url
+          article.featuredImageAlt = imageResult.alt
+          article.imageAttribution = imageResult.attribution
+          
+          // Track download for Unsplash compliance
+          if (imageResult.downloadUrl) {
+            await trackDownload(imageResult.downloadUrl)
+          }
         }
         
-        console.log(`      🔗 Finding related content...`)
-        const relatedContent = await findRelatedContent(article, trend)
-        article.relatedBlogPosts = relatedContent.blogPosts
-        article.relatedArticles = relatedContent.articles
+        // Save to Sanity
+        console.log(`      💾 Saving to Sanity...`)
+        const created = await createDraftArticle(article)
+        console.log(`      ✅ Created: ${created._id}`)
         
-        generatedArticles.push({
-          ...article,
-          trendSource: {
-            platform: trend.platform,
-            trendingTopic: trend.topic,
-            trendingScore: trend.trendingScore || null,
-            detectedAt: new Date().toISOString(),
-          }
-        })
+        result.articlesCreated++
         
-      } catch (error) {
-        console.error(`      ❌ Failed to generate: ${error.message}`)
-      }
-      
-      if (i < selectedTrends.length - 1) {
+        // Small delay between articles
         await sleep(2000)
+        
+      } catch (err) {
+        console.log(`      ❌ Error: ${err.message}`)
+        result.errors.push(`Article "${trend.topic}": ${err.message}`)
       }
     }
 
-    // Step 5: Save to Sanity
-    console.log('\n💾 STEP 5: Saving articles to Sanity as drafts...')
-    
-    let savedCount = 0
-    const savedArticles = []
-    
-    for (const article of generatedArticles) {
-      try {
-        const result = await createDraftArticle(article)
-        console.log(`   ✅ Saved: "${article.title}" (ID: ${result._id})`)
-        savedCount++
-        savedArticles.push({ id: result._id, title: article.title })
-      } catch (error) {
-        console.error(`   ❌ Failed to save "${article.title}": ${error.message}`)
-      }
+    // Step 5: Run GEO migration to catch any articles missing GEO content
+    console.log('\n🎯 Running post-generation GEO migration...')
+    try {
+      const geoResult = await runGeoMigration(CONFIG.geoMigrationMaxArticles)
+      result.geoMigration = geoResult
+      lastGeoMigrationResult = geoResult
+      console.log(`   GEO Migration: ${geoResult.updated} articles updated, ${geoResult.errors} errors`)
+    } catch (err) {
+      console.log(`   ⚠️ GEO Migration error: ${err.message}`)
+      result.geoMigration = { updated: 0, errors: 1, error: err.message }
     }
-
-    const duration = Math.round((Date.now() - startTime) / 1000)
 
     // Summary
     console.log('\n═══════════════════════════════════════════════════════════════')
-    console.log('📊 SUMMARY')
-    console.log('═══════════════════════════════════════════════════════════════')
-    console.log(`   Trends fetched:     ${allTrends.length}`)
-    console.log(`   Relevant trends:    ${relevantTrends.length}`)
-    console.log(`   New topics:         ${newTrends.length}`)
-    console.log(`   Articles generated: ${generatedArticles.length}`)
-    console.log(`   Articles saved:     ${savedCount}`)
-    console.log(`   Duration:           ${duration}s`)
-    console.log('═══════════════════════════════════════════════════════════════')
-    console.log(`✅ Done! ${savedCount} new article drafts ready for review.`)
-
-    isRunning = false
-    lastRunResult = {
-      success: true,
-      message: `Generated ${savedCount} article drafts`,
-      articlesGenerated: savedCount,
-      articles: savedArticles,
-      trendsChecked: allTrends.length,
-      duration: duration
+    console.log('📊 Generation Complete!')
+    console.log(`   Articles created: ${result.articlesCreated}`)
+    console.log(`   Errors: ${result.errors.length}`)
+    if (result.geoMigration) {
+      console.log(`   GEO backfills: ${result.geoMigration.updated}`)
     }
-    lastRunTime = new Date().toISOString()
-    
-    return lastRunResult
+    console.log('═══════════════════════════════════════════════════════════════')
 
+    result.message = `Created ${result.articlesCreated} articles`
+    
   } catch (error) {
-    console.error('💥 Fatal error:', error)
+    console.error('❌ Fatal error:', error)
+    result.success = false
+    result.message = error.message
+    result.errors.push(error.message)
+  } finally {
     isRunning = false
-    lastRunResult = { success: false, message: error.message, error: true }
-    lastRunTime = new Date().toISOString()
-    return lastRunResult
+    lastRunResult = result
   }
+
+  return result
 }
 
 // ==================== HTTP SERVER ====================
 
 const server = http.createServer(async (req, res) => {
-  const url = new URL(req.url, `http://localhost:${PORT}`)
+  const url = new URL(req.url, `http://${req.headers.host}`)
   
   // CORS headers
   res.setHeader('Access-Control-Allow-Origin', '*')
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+  res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type')
   
   if (req.method === 'OPTIONS') {
-    res.writeHead(200)
+    res.writeHead(204)
     res.end()
     return
   }
 
   // Health check
-  if (url.pathname === '/' || url.pathname === '/health') {
+  if (url.pathname === '/health' && req.method === 'GET') {
     res.writeHead(200, { 'Content-Type': 'application/json' })
-    res.end(JSON.stringify({
-      status: 'ok',
-      service: 'kyndall-blog-engine',
-      isRunning,
-      lastRunTime,
-      lastRunResult: lastRunResult ? {
-        success: lastRunResult.success,
-        articlesGenerated: lastRunResult.articlesGenerated || 0
-      } : null
-    }))
+    res.end(JSON.stringify({ status: 'healthy', timestamp: new Date().toISOString() }))
     return
   }
 
   // Status endpoint
-  if (url.pathname === '/status') {
+  if (url.pathname === '/status' && req.method === 'GET') {
     res.writeHead(200, { 'Content-Type': 'application/json' })
     res.end(JSON.stringify({
       isRunning,
       lastRunTime,
-      lastRunResult
+      lastRunResult,
+      lastGeoMigrationResult,
     }))
     return
   }
 
-  // Trigger endpoint
-  if (url.pathname === '/generate' || url.pathname === '/trigger') {
+  // Generate endpoint (requires auth)
+  if (url.pathname === '/generate') {
     // Check auth
     const authHeader = req.headers.authorization || ''
-    const providedSecret = authHeader.replace('Bearer ', '')
+    const token = authHeader.replace('Bearer ', '')
     
-    if (providedSecret !== API_SECRET) {
+    if (token !== API_SECRET) {
       res.writeHead(401, { 'Content-Type': 'application/json' })
-      res.end(JSON.stringify({ error: 'Unauthorized. Provide valid API_SECRET.' }))
+      res.end(JSON.stringify({ error: 'Unauthorized' }))
       return
     }
 
@@ -381,6 +345,43 @@ const server = http.createServer(async (req, res) => {
     return
   }
 
+  // Manual GEO migration endpoint (for testing/maintenance)
+  if (url.pathname === '/geo-migrate') {
+    // Check auth
+    const authHeader = req.headers.authorization || ''
+    const token = authHeader.replace('Bearer ', '')
+    
+    if (token !== API_SECRET) {
+      res.writeHead(401, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ error: 'Unauthorized' }))
+      return
+    }
+
+    if (req.method !== 'POST') {
+      res.writeHead(405, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ error: 'Method not allowed. Use POST.' }))
+      return
+    }
+
+    console.log('🎯 Manual GEO migration triggered...')
+    
+    try {
+      const result = await runGeoMigration(CONFIG.geoMigrationMaxArticles)
+      lastGeoMigrationResult = result
+      
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({
+        message: 'GEO migration complete',
+        ...result
+      }))
+    } catch (err) {
+      res.writeHead(500, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ error: err.message }))
+    }
+    
+    return
+  }
+
   // 404
   res.writeHead(404, { 'Content-Type': 'application/json' })
   res.end(JSON.stringify({ error: 'Not found' }))
@@ -392,9 +393,10 @@ server.listen(PORT, () => {
   console.log(`📡 Listening on port ${PORT}`)
   console.log('═══════════════════════════════════════════════════════════════')
   console.log('Endpoints:')
-  console.log(`  GET  /health   - Health check`)
-  console.log(`  GET  /status   - Job status & last run info`)
-  console.log(`  POST /generate - Trigger article generation (requires auth)`)
+  console.log(`  GET  /health      - Health check`)
+  console.log(`  GET  /status      - Job status & last run info`)
+  console.log(`  POST /generate    - Trigger article generation (requires auth)`)
+  console.log(`  POST /geo-migrate - Manual GEO migration (requires auth)`)
   console.log('═══════════════════════════════════════════════════════════════')
 })
 
